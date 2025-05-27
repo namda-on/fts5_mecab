@@ -529,7 +529,6 @@ int sqlite3_ftsmecab_init( /* entry point for "fts5_mecab.o" */
   char **pzErrMsg, 
   const sqlite3_api_routines *pApi
 ){
-  printf("sqlite3_ftsmecab_init()\n");
   int rc = SQLITE_OK;
   SQLITE_EXTENSION_INIT2(pApi);
   /* insert code to initialize your extension here */
