@@ -67,7 +67,45 @@ fts5_api *fts5_api_from_db(sqlite3 *db){
 **
 */
 
-/* 
+
+static char *global_dict_path = NULL;
+static void mecab_dict(sqlite3_context *pCtx, int nVal, sqlite3_value **apVal){
+#ifdef DEBUG
+    printf("mecab_dict()\n");
+#endif
+  if (nVal >= 1){
+    const char *text = (const char *) sqlite3_value_text(apVal[0]);
+    if (text) {
+      size_t len = strlen(text);
+      char sep = '/';
+      char *new_path = (char *)sqlite3_malloc(len + 2);
+      if (new_path == NULL) {
+        sqlite3_result_error_nomem(pCtx);
+        return;
+      }
+      strcpy(new_path, text);
+      if (len > 0 && new_path[len - 1] != sep) {
+        new_path[len] = sep;
+        new_path[len + 1] = '\0';
+      } else {
+        new_path[len] = '\0'; // 널 종료 문자 보장
+      }
+
+      if (global_dict_path != NULL) {
+        sqlite3_free(global_dict_path);
+      }
+      global_dict_path = new_path;
+#ifdef DEBUG
+      printf("new dict_path: %s\n", new_path);
+#endif
+      sqlite3_result_text(pCtx, global_dict_path, -1, SQLITE_TRANSIENT);
+      return;
+    }
+  }
+  sqlite3_result_null(pCtx);
+}
+
+/*
 ** Implementation Help
 ** https://taku910.github.io/mecab/libmecab.html
 */
@@ -78,104 +116,75 @@ typedef struct MecabTokenizer {
   int stop789;
 } MecabTokenizer;
 
-/*
-** ** Implementation Help **
-** https://www.sqlite.org/fts5.html
-** 7. Extending FTS5
-**   7.1. Custom Tokenizers
-**     To create a custom tokenizer, an application must implement
-**     three functions: a tokenizer constructor (xCreate), 
-**     a destructor (xDelete) and a function to do the actual 
-**     tokenization (xTokenize). ...
-**
-**     struct fts5_tokenizer {
-**       int (*xCreate)(void*, const char **azArg, int nArg, Fts5Tokenizer **ppOut);
-**       ....
-**     }
-**
-**     This function is used to allocate and initialize a tokenizer
-**     instance. A tokenizer instance is required to actually
-**     tokenize text.
-**
-**     The first argument passed to this function is a copy of 
-**     the (void*) pointer provided by the application when the 
-**     fts5_tokenizer object was registered with FTS5 (the third
-**     argument to xCreateTokenizer()). The second and third
-**     arguments are an array of nul-terminated strings containing
-**     the tokenizer arguments, if any, specified following the
-**     tokenizer name as part of the CREATE VIRTUAL TABLE statement
-**     used to create the FTS5 table.
-**
-**     The final argument is an output variable. If successful, 
-**     (*ppOut) should be set to point to the new tokenizer handle
-**     and SQLITE_OK returned. If an error occurs, some value other
-**     than SQLITE_OK should be returned. In this case, fts5
-**     assumes that the final value of *ppOut is undefined. 
-*/
 static int mecabCreate(
-  void *pContext, 
-  const char **azArg, int nArg, 
+  void *pContext,
+  const char **azArg, int nArg,
   Fts5Tokenizer **ppOut
 ){
-  // parse args
-  int verbose = 0;    // 0 or 1 or 2
-  int stop789 = 0;    // 0:false, 1:true
+  fts5_api *pApi = (fts5_api*)pContext;
+  MecabTokenizer *p = NULL;
+  int rc = SQLITE_OK;
+
+  p = sqlite3_malloc(sizeof(MecabTokenizer));
+  if (p == NULL) {
+    return SQLITE_NOMEM;
+  }
+  memset(p, 0, sizeof(MecabTokenizer));
 
   for (int i = 0; i < nArg; i++) {
     if (strcmp(azArg[i], "stop789") == 0) {
-        stop789 = 1;
+      p->stop789 = 1;
     } else if (strcmp(azArg[i], "vv") == 0) {
-      if (verbose < 2) {
-        verbose = 2;
-      }
+      p->verbose = 2;
     } else if (strcmp(azArg[i], "v") == 0) {
-      if (verbose < 2) {
-        verbose += 1;
-      }
-    } else {
-      if (verbose > 0) {
-        printf("ignored unknown option: %s\n", azArg[i]);
-      }
+      p->verbose = 1;
     }
   }
-
 #ifdef DEBUG
-  if (verbose > 0) { // DEBUG LEVEL 1
-    printf("mecabCreate()\n"); 
-    printf("nArg: %d\n", nArg);
-    if (verbose > 1) { // DEBUG LEVEL 2
-      for (int i = 0; i < nArg; i++) {
-        printf("  %d: %s\n", i, azArg[i]);
-      }
-    }
-    printf("verbose = %d\n", verbose);
-    printf("stop789 = %d\n", stop789);
+  if (p->verbose > 0) {
+    printf("mecabCreate(): verbose = %d, stop789 = %d\n", p->verbose, p->stop789);
   }
 #endif
 
-  fts5_api *pApi = (fts5_api*)pContext;
-  MecabTokenizer *p = 0;
-  p = sqlite3_malloc(sizeof(MecabTokenizer));
-  if (p == NULL) {
-    return SQLITE_NOMEM; 
+  if (global_dict_path == NULL) {
+    printf("Need to initialize dict path");
+    return SQLITE_ERROR;
   }
-  memset(p, 0, sizeof(MecabTokenizer));
-  
-  p->mecab = mecab_new(nArg, (char**)azArg);
+
+  const int MAX_MECAB_ARGS = 1 + 2 + nArg; // "program_name" + "-d" + "dict_path" + nArg;
+  char *mecab_argv_buffer[MAX_MECAB_ARGS];
+  int mecab_argc = 0;
+  mecab_argv_buffer[mecab_argc++] = "mecab_tokenizer_instance";
+  mecab_argv_buffer[mecab_argc++] = "-d";
+  mecab_argv_buffer[mecab_argc++] = global_dict_path;
+
+  // FTS5의 CREATE VIRTUAL TABLE 구문에서 `tokenize='mecab "arg1" "arg2"'` 형태로 넘어온 인자들
+  for (int i = 0; i < nArg; ++i) {
+      mecab_argv_buffer[mecab_argc++] = (char*)azArg[i];
+  }
+
+#ifdef DEBUG
+  if (p -> verbose > 0) { // DEBUG LEVEL 1
+    printf("Args passed to mecab_new:\n");
+    for (int i = 0; i < mecab_argc; ++i) {
+      printf("  Arg %d: %s\n", i, mecab_argv_buffer[i]);
+    }
+  }
+#endif
+  printf("before mecab new\n");
+  p->mecab = mecab_new(mecab_argc, mecab_argv_buffer);
+  printf("after mecab new\n");
   if (p->mecab == NULL) {
     sqlite3_free(p);
-    return SQLITE_ERROR; 
+    return SQLITE_ERROR;
   }
-  p->verbose = verbose;
-  p->stop789 = stop789;
-
 #ifdef DEBUG
   /*
   ** ** Implementation Help **
   ** https://taku910.github.io/mecab/libmecab.html
   */
   // Dictionary info
-  if (verbose > 0) { // DEBUG LEVEL 1
+  if (p -> verbose > 0) { // DEBUG LEVEL 1
     const mecab_dictionary_info_t *d = mecab_dictionary_info(p->mecab);
     for (; d; d = d->next) {
       printf("mecab_dictionary_info()\n");
@@ -194,27 +203,6 @@ static int mecabCreate(
   return SQLITE_OK;
 }
 
-/*
-** ** Implementation Help **
-** https://www.sqlite.org/fts5.html
-** 7. Extending FTS5
-**   7.1. Custom Tokenizers
-**     To create a custom tokenizer, an application must implement
-**     three functions: a tokenizer constructor (xCreate), 
-**     a destructor (xDelete) and a function to do the actual 
-**     tokenization (xTokenize). ...
-**     
-**     struct fts5_tokenizer {
-**       ....
-**       void (*xDelete)(Fts5Tokenizer*);
-**       ....
-**     }
-**
-**     This function is invoked to delete a tokenizer handle
-**     previously allocated using xCreate(). Fts5 guarantees
-**     that this function will be invoked exactly once for each 
-**     successful call to xCreate(). 
-*/
 static void mecabDelete(Fts5Tokenizer *pTokenizer){
   MecabTokenizer *p = (MecabTokenizer*)pTokenizer;
 #ifdef DEBUG
@@ -222,101 +210,18 @@ static void mecabDelete(Fts5Tokenizer *pTokenizer){
     printf("mecabDelete()\n");
   }
 #endif
-  /* 
+  /*
   ** Implementation Help
   ** https://taku910.github.io/mecab/libmecab.html
   */
-  mecab_destroy(p->mecab);
+  if (p -> mecab) {
+    mecab_destroy(p->mecab);
+  }
   p->verbose = 0;
   p->stop789 = 0;
   sqlite3_free(p);
 }
 
-/*
-** ** Implementation Help **
-** https://www.sqlite.org/fts5.html
-** 7. Extending FTS5
-**   7.1. Custom Tokenizers
-**     To create a custom tokenizer, an application must implement
-**     three functions: a tokenizer constructor (xCreate), 
-**     a destructor (xDelete) and a function to do the actual 
-**     tokenization (xTokenize). ...
-**
-**     
-**     struct fts5_tokenizer {
-**       ....
-**       int (*xTokenize)(Fts5Tokenizer*, 
-**           void *pCtx,
-**           int flags,            /* Mask of FTS5_TOKENIZE_* flags * /
-**           const char *pText, int nText, 
-**           int (*xToken)(
-**             void *pCtx,         /* Copy of 2nd argument to xTokenize() * /
-**             int tflags,         /* Mask of FTS5_TOKEN_* flags * /
-**             const char *pToken, /* Pointer to buffer containing token * /
-**             int nToken,         /* Size of token in bytes * /
-**             int iStart,         /* Byte offset of token within input text * /
-**             int iEnd            /* Byte offset of end of token within input text * /
-**           )
-**       );
-**     }
-**
-**     This function is expected to tokenize the nText byte string
-**     indicated by argument pText. pText may or may not be 
-**     nul-terminated. The first argument passed to this function
-**     is a pointer to an Fts5Tokenizer object returned by an
-**     earlier call to xCreate().
-**
-**     The second argument indicates the reason that FTS5 is
-**     requesting tokenization of the supplied text. This is
-**     always one of the following four values:
-**
-**          FTS5_TOKENIZE_DOCUMENT - A document is being inserted
-**          into or removed from the FTS table. The tokenizer is
-**          being invoked to determine the set of tokens to add to
-**          (or delete from) the FTS index.
-**
-**          FTS5_TOKENIZE_QUERY - A MATCH query is being executed
-**          against the FTS index. The tokenizer is being called
-**          to tokenize a bareword or quoted string specified as
-**          part of the query.
-**
-**          (FTS5_TOKENIZE_QUERY | FTS5_TOKENIZE_PREFIX) - Same as
-**          FTS5_TOKENIZE_QUERY, except that the bareword or quoted
-**          string is followed by a "*" character, indicating that
-**          the last token returned by the tokenizer will be treated
-**          as a token prefix.
-**
-**          FTS5_TOKENIZE_AUX - The tokenizer is being invoked to
-**          satisfy an fts5_api.xTokenize() request made by an
-**          auxiliary function. Or an fts5_api.xColumnSize() request
-**          made by the same on a columnsize=0 database. 
-**
-**     For each token in the input string, the supplied callback
-**     xToken() must be invoked. The first argument to it should be
-**     a copy of the pointer passed as the second argument to
-**     xTokenize(). The third and fourth arguments are a pointer to
-**     a buffer containing the token text, and the size of the token
-**     in bytes. The 4th and 5th arguments are the byte offsets of
-**     the first byte of and first byte immediately following the
-**     text from which the token is derived within the input.
-**
-**     The second argument passed to the xToken() callback
-**     ("tflags") should normally be set to 0. The exception is if
-**     the tokenizer supports synonyms. In this case see the
-**     discussion below for details.
-**
-**     FTS5 assumes the xToken() callback is invoked for each token
-**     in the order that they occur within the input text.
-**
-**     If an xToken() callback returns any value other than
-**     SQLITE_OK, then the tokenization should be abandoned and the
-**     xTokenize() method should immediately return a copy of the
-**     xToken() return value. Or, if the input buffer is exhausted,
-**     xTokenize() should return SQLITE_OK. Finally, if an error
-**     occurs with the xTokenize() implementation itself, it may
-**     abandon the tokenization and return any error code other
-**     than SQLITE_OK or SQLITE_DONE. 
-*/
 static int mecabTokenize(
   Fts5Tokenizer *pTokenizer, 
   void *pCtx,
@@ -512,15 +417,7 @@ static int mecabTokenize(
   return rc;
 }
 
-/*
-** ** Implementation Help **
-** https://www.sqlite.org/loadext.html
-** 4. Programming Loadable Extensions
-**   A template loadable extension contains the following three
-**   elements:
-**     3. Add an extension loading entry point routine that looks
-**        like something the following: 
-*/
+
 #ifdef _WIN32
 __declspec(dllexport)
 #endif
@@ -531,16 +428,7 @@ int sqlite3_ftsmecab_init( /* entry point for "fts5_mecab.o" */
 ){
   int rc = SQLITE_OK;
   SQLITE_EXTENSION_INIT2(pApi);
-  /* insert code to initialize your extension here */
 
-  /*
-  ** ** Implementation Help **
-  ** https://www.sqlite.org/fts5.html
-  ** 7. Extending FTS5
-  **   Before a new auxiliary function or tokenizer implementation
-  **   may be registered with FTS5, an application must obtain a 
-  **   pointer to the "fts5_api" structure.
-  */
   fts5_api *pApi_fts5;
   
   pApi_fts5 = fts5_api_from_db(db);
@@ -549,61 +437,9 @@ int sqlite3_ftsmecab_init( /* entry point for "fts5_mecab.o" */
     return SQLITE_ERROR;
   }
   
-  /*
-  ** ** Implementation Help **
-  ** https://www.sqlite.org/fts5.html
-  ** 7. Extending FTS5
-  **   ...
-  **   The fts5_api structure is defined as follows. It exposes
-  **   three methods, one each for registering new auxiliary
-  **   functions and tokenizers, and one for retrieving existing
-  **   tokenizer. The latter is intended to facilitate the
-  **   implementation of "tokenizer wrappers" similar to the
-  **    built-in porter tokenizer.
-  **
-  **   typedef struct fts5_api fts5_api;
-  **   struct fts5_api {
-  **     int iVersion;                   /* Currently always set to 2 * /
-  **   
-  **     /* Create a new tokenizer * /
-  **     int (*xCreateTokenizer)(
-  **       fts5_api *pApi,
-  **       const char *zName,
-  **       void *pContext,
-  **       fts5_tokenizer *pTokenizer,
-  **       void (*xDestroy)(void*)
-  **     );
-  **
-  **     /* Find an existing tokenizer * /
-  **     int (*xFindTokenizer)(
-  **       fts5_api *pApi,
-  **       const char *zName,
-  **       void **ppContext,
-  **       fts5_tokenizer *pTokenizer
-  **     );
-  **
-  **     /* Create a new auxiliary function * /
-  **     int (*xCreateFunction)(
-  **       fts5_api *pApi,
-  **       const char *zName,
-  **       void *pContext,
-  **       fts5_extension_function xFunction,
-  **       void (*xDestroy)(void*)
-  **     );
-  **   };
-  **
-  **   ...
-  **
-  **   7.1. Custom Tokenizers
-  **     To create a custom tokenizer, an application must implement 
-  **     three functions:
-  **       a tokenizer constructor (xCreate), 
-  **       a destructor (xDelete) 
-  **     and
-  **      a function to do the actual tokenization (xTokenize). 
-  **     ...
-  */
   fts5_tokenizer t;
+
+  rc = sqlite3_create_function(db, "mecab_dict", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, &mecab_dict, NULL, NULL);
   
   t.xCreate = mecabCreate;
   t.xDelete = mecabDelete;
