@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [ master ]
+    tags: [ '*' ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  MacOS:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install Ninja
+      run: brew install ninja
+
+    - name: 'Run CMake'
+      uses: lukka/run-cmake@v10
+      with:
+        configurePreset: 'macos'
+        buildPreset: 'macos'
+
+    - name: "Check file existence"
+      uses: andstor/file-existence-action@v3
+      with:
+        allow_failure: true
+        files: "${{ github.workspace }}/build/libfts5_mecab.dylib, \
+                ${{ github.workspace }}/build/mecabrc, \
+                ${{ github.workspace }}/build/lib/libmecab.2.dylib, \
+                ${{ github.workspace }}/build/lib/mecab/dic/ipadic"
+
+    - name: Package
+      run: |
+        sudo xattr -r -d com.apple.quarantine libfts5_mecab.dylib
+        mkdir libfts5_mecab-macos-arm64
+        cp -r libfts5_mecab.dylib mecabrc lib/libmecab.2.dylib lib/mecab/dic/ipadic libfts5_mecab-macos-arm64/
+        tar -czvf libfts5_mecab-macos-arm64.tar.gz libfts5_mecab-macos-arm64
+      working-directory: ${{ github.workspace }}/build
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        draft: true
+        files: "${{ github.workspace }}/build/libfts5_mecab-macos-arm64.tar.gz"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -7,7 +7,7 @@
   },
   "configurePresets": [
     {
-      "name": "default",
+      "name": "macos",
       "displayName": "macOS Ninja",
       "description": "Configure for macOS build",
       "generator": "Ninja",
@@ -26,8 +26,8 @@
   ],
   "buildPresets": [
     {
-      "name": "default",
-      "configurePreset": "default",
+      "name": "macos",
+      "configurePreset": "macos",
       "displayName": "default(macos)",
       "description": "Build for macOS local"
     }
