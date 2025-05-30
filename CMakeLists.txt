@@ -11,7 +11,7 @@ add_custom_target(build_mecab_libs ALL
 # Mecab include/lib 디렉토리 지정
 set(MECAB_PREFIX "${CMAKE_SOURCE_DIR}/build")
 # Mecab dictionary를 상대경로로 지정 (working directory 기준)
-set(MECAB_DIC_RELATIVE_PATH "./fts-jp-mecab/lib/mecab/dic/ipadic")
+set(MECAB_DIC_RELATIVE_PATH "./fts-jp-mecab/lib/dict")
 
 include_directories(${MECAB_PREFIX}/include)
 link_directories(${MECAB_PREFIX}/lib)

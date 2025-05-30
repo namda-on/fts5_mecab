@@ -20,6 +20,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         submodules: true
+        fetch-depth: 0
 
     - name: Install Ninja
       run: brew install ninja
@@ -42,8 +43,10 @@ jobs:
     - name: Package
       run: |
         sudo xattr -r -d com.apple.quarantine libfts5_mecab.dylib
-        mkdir libfts5_mecab-macos-arm64
-        cp -r libfts5_mecab.dylib mecabrc lib/libmecab.2.dylib lib/mecab/dic/ipadic libfts5_mecab-macos-arm64/
+        mkdir -p libfts5_mecab-macos-arm64/lib
+        cp -r libfts5_mecab.dylib mecabrc libfts5_mecab-macos-arm64/
+        cp -r lib/mecab/dic/ipadic libfts5_mecab-macos-arm64/lib/dict
+        cp lib/libmecab.2.dylib libfts5_mecab-macos-arm64/lib
         tar -czvf libfts5_mecab-macos-arm64.tar.gz libfts5_mecab-macos-arm64
       working-directory: ${{ github.workspace }}/build
 
