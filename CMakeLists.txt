@@ -43,6 +43,12 @@ if(APPLE)
     COMMAND install_name_tool -id "@rpath/libmecab.2.dylib" "${MECAB_PREFIX}/lib/libmecab.2.dylib"
     COMMENT "Changing install_name of libmecab.2.dylib to @rpath/lib/libmecab.2.dylib"
   )
+elseif(UNIX)
+  set_target_properties(fts5_mecab PROPERTIES
+    INSTALL_RPATH "$ORIGIN/lib"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_WITH_INSTALL_RPATH TRUE
+  )
 endif()
 
 if(DEBUG)

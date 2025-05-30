@@ -7,9 +7,9 @@
   },
   "configurePresets": [
     {
-      "name": "macos",
-      "displayName": "macOS Ninja",
-      "description": "Configure for macOS build",
+      "name": "debug",
+      "displayName": "debug build",
+      "description": "debug build",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
@@ -22,14 +22,37 @@
           "value": "ON"
         }
       }
+    },
+    {
+      "name": "release",
+      "displayName": "release build",
+      "description": "release build",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "DEBUG": {
+          "type": "BOOL",
+          "value": "OFF"
+        },
+        "STOP789": {
+          "type": "BOOL",
+          "value": "ON"
+        }
+      }
     }
   ],
   "buildPresets": [
     {
-      "name": "macos",
-      "configurePreset": "macos",
+      "name": "debug",
+      "configurePreset": "debug",
       "displayName": "default(macos)",
-      "description": "Build for macOS local"
+      "description": "Build for debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "displayName": "macos",
+      "description": "Build for release"
     }
   ]
 }

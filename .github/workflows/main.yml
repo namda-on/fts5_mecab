@@ -16,6 +16,7 @@ permissions:
 jobs:
   MacOS:
     runs-on: macos-latest
+    needs: Linux # 임시로
     steps:
     - uses: actions/checkout@v4
       with:
@@ -28,8 +29,8 @@ jobs:
     - name: 'Run CMake'
       uses: lukka/run-cmake@v10
       with:
-        configurePreset: 'macos'
-        buildPreset: 'macos'
+        configurePreset: 'release'
+        buildPreset: 'release'
 
     - name: "Check file existence"
       uses: andstor/file-existence-action@v3
@@ -55,5 +56,74 @@ jobs:
       with:
         draft: true
         files: "${{ github.workspace }}/build/libfts5_mecab-macos-arm64.tar.gz"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  Linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+            build_triple: x86_64-pc-linux-gnu
+
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            build_triple: aarch64-unknown-linux-gnu
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        fetch-depth: 0
+
+    - name: Update apt-get
+      run: sudo apt-get update
+
+    - name: Install build tools
+      run: |
+        sudo apt-get install -y ninja-build
+        sudo apt-get install -y build-essential
+        sudo apt-get install -y gcc g++
+
+    - name: 'Run CMake'
+      uses: lukka/run-cmake@v10
+      with:
+        configurePreset: 'release'
+        buildPreset: 'release'
+      env:
+        BUILD_TRIPLE: ${{ matrix.build_triple }}
+
+    - name: check file with ls
+      run: |
+        ls -al
+        ls -al ./lib
+      working-directory: ${{ github.workspace }}/build
+
+    - name: "Check file existence"
+      uses: andstor/file-existence-action@v3
+      with:
+        allow_failure: true
+        files: "${{ github.workspace }}/build/libfts5_mecab.so, \
+              ${{ github.workspace }}/build/mecabrc, \
+              ${{ github.workspace }}/build/lib/libmecab.so, \
+              ${{ github.workspace }}/build/lib/mecab/dic/ipadic"
+
+    - name: Package
+      run: |
+        mkdir -p ${{ env.TARGET_DIR }}/lib
+        cp -r libfts5_mecab.so mecabrc ${{ env.TARGET_DIR }}/
+        cp -r lib/mecab/dic/ipadic ${{ env.TARGET_DIR }}/lib/dict
+        cp -d lib/libmecab.so* ${{ env.TARGET_DIR }}/lib
+        tar -czvf ${{ env.TARGET_DIR }}.tar.gz ${{ env.TARGET_DIR }}
+      working-directory: ${{ github.workspace }}/build
+      env:
+        TARGET_DIR: libfts5_mecab-ubuntu-24.04-${{ matrix.arch }}
+
+    - name: Release
+      uses: softprops/action-gh-release@v1
+      with:
+        draft: true
+        files: "${{ github.workspace }}/build/libfts5_mecab-ubuntu-24.04-${{ matrix.arch }}.tar.gz"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
