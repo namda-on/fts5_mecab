@@ -14,7 +14,7 @@ cp sqlite/sqlite3*.h $PREFIX/include/
 # Mecab 빌드
 (
   cd mecab/mecab
-  ./configure --prefix=$PREFIX --with-charset=UTF8 --enable-static --disable-shared
+  ./configure --prefix=$PREFIX --with-charset=UTF8
   make && make install
 )
 (

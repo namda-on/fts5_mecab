@@ -69,6 +69,7 @@ fts5_api *fts5_api_from_db(sqlite3 *db){
 
 
 static char *global_dict_path = NULL;
+static char *global_rc_path = NULL;
 static void mecab_dict(sqlite3_context *pCtx, int nVal, sqlite3_value **apVal){
 #ifdef DEBUG
     printf("mecab_dict()\n");
@@ -103,6 +104,35 @@ static void mecab_dict(sqlite3_context *pCtx, int nVal, sqlite3_value **apVal){
     }
   }
   sqlite3_result_null(pCtx);
+}
+
+static void mecab_rc(sqlite3_context *pCtx, int nVal, sqlite3_value **apVal){
+#ifdef DEBUG
+    printf("mecab_rc()\n");
+#endif
+    if (nVal >= 1){
+        const char *text = (const char *) sqlite3_value_text(apVal[0]);
+        if (text) {
+            // No need to append slash here, it's a file path
+            char *new_rc_path = (char *)sqlite3_malloc(strlen(text) + 1);
+            if (new_rc_path == NULL) {
+                sqlite3_result_error_nomem(pCtx);
+                return;
+            }
+            strcpy(new_rc_path, text);
+
+            if (global_rc_path != NULL) {
+                sqlite3_free(global_rc_path);
+            }
+            global_rc_path = new_rc_path;
+#ifdef DEBUG
+            printf("new rc_path: %s\n", global_rc_path);
+#endif
+            sqlite3_result_text(pCtx, global_rc_path, -1, SQLITE_TRANSIENT);
+            return;
+        }
+    }
+    sqlite3_result_null(pCtx);
 }
 
 /*
@@ -146,17 +176,28 @@ static int mecabCreate(
   }
 #endif
 
-  if (global_dict_path == NULL) {
-    printf("Need to initialize dict path");
-    return SQLITE_ERROR;
-  }
-
-  const int MAX_MECAB_ARGS = 1 + 2 + nArg; // "program_name" + "-d" + "dict_path" + nArg;
+  const int MAX_MECAB_ARGS = 1 + 2 + 2 + nArg; // "program_name" + "-d" + "dict_path" + "-r" + "rcfile" + nArg;
   char *mecab_argv_buffer[MAX_MECAB_ARGS];
   int mecab_argc = 0;
   mecab_argv_buffer[mecab_argc++] = "mecab_tokenizer_instance";
-  mecab_argv_buffer[mecab_argc++] = "-d";
-  mecab_argv_buffer[mecab_argc++] = global_dict_path;
+  if (global_dict_path != NULL) {
+    mecab_argv_buffer[mecab_argc++] = "-d";
+    mecab_argv_buffer[mecab_argc++] = global_dict_path;
+#ifdef DEBUG
+    if (p -> verbose > 0) {
+      printf("dict path : %s\n", global_dict_path);
+    }
+#endif
+  }
+  if (global_rc_path != NULL) {
+    mecab_argv_buffer[mecab_argc++] = "-r";
+    mecab_argv_buffer[mecab_argc++] = global_rc_path;
+#ifdef DEBUG
+    if (p -> verbose > 0) {
+      printf("rc path : %s\n", global_rc_path);
+    }
+#endif
+  }
 
   // FTS5의 CREATE VIRTUAL TABLE 구문에서 `tokenize='mecab "arg1" "arg2"'` 형태로 넘어온 인자들
   for (int i = 0; i < nArg; ++i) {
@@ -440,6 +481,7 @@ int sqlite3_ftsmecab_init( /* entry point for "fts5_mecab.o" */
   fts5_tokenizer t;
 
   rc = sqlite3_create_function(db, "mecab_dict", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, &mecab_dict, NULL, NULL);
+  rc = sqlite3_create_function(db, "mecab_rc", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, NULL, &mecab_rc, NULL, NULL);
   
   t.xCreate = mecabCreate;
   t.xDelete = mecabDelete;
