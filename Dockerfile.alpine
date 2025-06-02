@@ -1,0 +1,31 @@
+FROM alpine:latest
+ARG ARCH=amd64
+ARG BUILD_TRIPLE=x86_64-pc-linux-gnu
+
+RUN apk update && apk add --no-cache \
+    build-base \
+    cmake \
+    ninja-build \
+    wget \
+    curl \
+    tar \
+    automake \
+    autoconf \
+    libtool \
+    linux-headers
+
+ENV PATH="/usr/lib/ninja-build/bin:$PATH"
+ENV BUILD_TRIPLE=${BUILD_TRIPLE}
+
+WORKDIR /app
+COPY . .
+
+RUN mkdir build
+RUN cmake --preset release
+RUN cmake --build --preset release -j "$(nproc)"
+
+
+RUN mkdir -p /output/libfts5_mecab/lib/dict
+RUN cp build/libfts5_mecab.so build/mecabrc /output/libfts5_mecab/
+RUN cp build/lib/mecab/dic/ipadic/* /output/libfts5_mecab/lib/dict
+RUN cp -d build/lib/libmecab.so* /output/libfts5_mecab/lib

@@ -16,7 +16,6 @@ permissions:
 jobs:
   MacOS:
     runs-on: macos-latest
-    needs: Linux # 임시로
     steps:
     - uses: actions/checkout@v4
       with:
@@ -44,18 +43,20 @@ jobs:
     - name: Package
       run: |
         sudo xattr -r -d com.apple.quarantine libfts5_mecab.dylib
-        mkdir -p libfts5_mecab-macos-arm64/lib
-        cp -r libfts5_mecab.dylib mecabrc libfts5_mecab-macos-arm64/
-        cp -r lib/mecab/dic/ipadic libfts5_mecab-macos-arm64/lib/dict
-        cp lib/libmecab.2.dylib libfts5_mecab-macos-arm64/lib
-        tar -czvf libfts5_mecab-macos-arm64.tar.gz libfts5_mecab-macos-arm64
+        mkdir -p ${{ env.TARGET_DIR }}/lib
+        cp -r libfts5_mecab.dylib mecabrc ${{ env.TARGET_DIR }}/
+        cp -r lib/mecab/dic/ipadic ${{ env.TARGET_DIR }}/lib/dict
+        cp lib/libmecab.2.dylib ${{ env.TARGET_DIR }}/lib
+        tar -czvf libfts5_mecab-darwin-arm64.tar.gz ${{ env.TARGET_DIR }}
       working-directory: ${{ github.workspace }}/build
+      env:
+        TARGET_DIR: libfts5_mecab-darwin-arm64
 
     - name: Release
       uses: softprops/action-gh-release@v1
       with:
         draft: true
-        files: "${{ github.workspace }}/build/libfts5_mecab-macos-arm64.tar.gz"
+        files: "${{ github.workspace }}/build/libfts5_mecab-darwin-arm64.tar.gz"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   Linux:
@@ -103,7 +104,6 @@ jobs:
     - name: "Check file existence"
       uses: andstor/file-existence-action@v3
       with:
-        allow_failure: true
         files: "${{ github.workspace }}/build/libfts5_mecab.so, \
               ${{ github.workspace }}/build/mecabrc, \
               ${{ github.workspace }}/build/lib/libmecab.so, \
@@ -121,9 +121,61 @@ jobs:
         TARGET_DIR: libfts5_mecab-ubuntu-24.04-${{ matrix.arch }}
 
     - name: Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         draft: true
         files: "${{ github.workspace }}/build/libfts5_mecab-ubuntu-24.04-${{ matrix.arch }}.tar.gz"
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  Linux_alpine:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+            build_triple: x86_64-pc-linux-gnu
+
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            build_triple: aarch64-unknown-linux-gnu
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+        fetch-depth: 0
+
+    - name: Build with Docker (Alpine ${{ matrix.arch }})
+      run: |
+        docker buildx build \
+          --build-arg ARCH=${{ matrix.arch }} \
+          --build-arg BUILD_TRIPLE=${{ matrix.build_triple }} \
+          -t fts-mecab-builder-alpine-${{ matrix.arch }} -f Dockerfile.alpine .
+        mkdir -p ${{ github.workspace }}/build
+        BUILDER_CID=$(docker create fts-mecab-builder-alpine-${{ matrix.arch }})
+        docker cp "${BUILDER_CID}:/output/." "${{ github.workspace}}/output/"
+
+    - name: Check file existence (Alpine ${{ matrix.arch }})
+      uses: andstor/file-existence-action@v3
+      with:
+        files: "${{ env.OUTPUT_PATH}}/libfts5_mecab.so, \
+                ${{ env.OUTPUT_PATH}}/mecabrc, \
+                ${{ env.OUTPUT_PATH}}/lib/libmecab.so, \
+                ${{ env.OUTPUT_PATH}}/lib/dict"
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        OUTPUT_PATH: ${{ github.workspace }}/output/libfts5_mecab
+
+    - name: Package
+      run: |
+        mv libfts5_mecab libfts5_mecab-alpine-${{ matrix.arch }}
+        tar -czvf libfts5_mecab-alpine-${{ matrix.arch }}.tar.gz libfts5_mecab-alpine-${{ matrix.arch }}
+      working-directory: ${{ github.workspace }}/output
+
+
+    - name: Release
+      uses: softprops/action-gh-release@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        draft: true
+        files: "${{ github.workspace }}/output/libfts5_mecab-alpine-${{ matrix.arch }}.tar.gz"

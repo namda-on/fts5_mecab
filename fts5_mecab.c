@@ -212,9 +212,7 @@ static int mecabCreate(
     }
   }
 #endif
-  printf("before mecab new\n");
   p->mecab = mecab_new(mecab_argc, mecab_argv_buffer);
-  printf("after mecab new\n");
   if (p->mecab == NULL) {
     sqlite3_free(p);
     return SQLITE_ERROR;

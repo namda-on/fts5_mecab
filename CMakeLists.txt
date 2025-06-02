@@ -3,7 +3,7 @@ project(fts5_mecab C)
 
 # mecab lib 및 사전 빌드
 add_custom_target(build_mecab_libs ALL
-  COMMAND bash ${CMAKE_SOURCE_DIR}/build.sh
+  COMMAND sh ${CMAKE_SOURCE_DIR}/build.sh
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   COMMENT "Executing shell script to Build mecab lib"
 )
